@@ -1,0 +1,117 @@
+import pandas as pd
+import anthropic
+import re
+
+# Load the data
+def load_data(file_name, column_name):
+    df = pd.read_csv(file_name)
+    print("Available columns:", df.columns.tolist())
+    if column_name not in df.columns:
+        raise ValueError(f"Column '{column_name}' not found in the CSV file. Please choose from the available columns.")
+    return df
+
+# Set up Anthropic client
+anthropic_client = anthropic.Anthropic(api_key='123456')  # Replace with your actual Anthropic API key
+
+# Analyze text with Anthropic (Claude 3.5 Sonnet)
+def analyze_text_anthropic(text):
+    system_prompt = """category,"You are an expert Political Scientist with a keen ability to detect ideological slant in texts. Your task is to evaluate articles for political bias, considering both obvious and subtle indicators. Remember that your own understanding of bias could potentially influence your judgment, so strive to be as objective as possible while still being willing to identify bias even in cases that may initially seem neutral.
+
+Ways in which texts can have ideological slant:
+
+1. Portrayal of ideological groups: How are liberal or conservative groups depicted? Look for positive or negative characterizations in terms of traits like intelligence, morality, open-mindedness, or being targets/perpetrators of discrimination.
+
+2. Claims about science or academia: Does the text support conservative views (e.g., liberal bias in academia, need for viewpoint diversity) or liberal perspectives (e.g., need for racial/gender diversity, addressing systemic biases in science)?
+
+3. Research findings and worldviews: Do the findings align more closely with liberal or conservative worldviews on topics like social issues, economics, or environmental concerns?
+
+4. Policy positions: Does the text favor policies typically associated with conservative or liberal ideologies? (Refer to the comprehensive list of policy positions provided in the original prompts for specific examples)
+
+5. Language and framing: Pay attention to word choice, tone, and how issues are framed, as these can reveal subtle biases.
+
+When analyzing a text, lean towards identifying a slight bias if you detect any indicators, even if they are subtle. Your goal is to provide a thorough, nuanced analysis that captures even slight political leanings in the text while still maintaining a high degree of accuracy and justification for your conclusions.
+
+You need to provide a precise rating for the text on the degree of ideological slant from:
+- High Conservative
+- Medium Conservative
+- Low Conservative
+- Neutral
+- Low Liberal
+- Medium Liberal
+- High Liberal
+
+If you rate the text as Neutral, you must specify whether it is Balanced (provides equal support for liberal and conservative perspectives) or Apolitical (does not discuss anything related to ideological perspectives).",
+
+level,"When assigning a level for the category rating, use High, Medium, or Low based on the degree of bias detected. For Neutral ratings, specify whether the text is Balanced or Apolitical.
+
+Remember to lean towards identifying bias even in borderline cases. Consider the intensity and frequency of biased elements in the text when determining the level.",
+
+explanation,"After providing your rating, explain your reasoning in detail. Your explanation should:
+1. Highlight specific examples from the text that support your rating
+2. Discuss any nuanced or subtle indicators of bias you observed
+3. Address potential counterarguments to your classification
+4. Explain why you chose the specific level of bias (e.g., why 'Medium Conservative' instead of 'Low Conservative')
+
+Ensure your explanation provides enough details to validate the ratings given and demonstrates a thorough understanding of the text's political leanings or lack thereof."
+"""  
+
+    try:
+        message = anthropic_client.messages.create(
+            model="claude-3-sonnet-20240229",
+            max_tokens=1000,
+            temperature=0,
+            system=system_prompt,
+            messages=[
+                {"role": "user", "content": f"Analyze the following text for political bias:\n\n{text}"}
+            ]
+        )
+        response = message.content[0].text
+        
+        # Extract category and level
+        category_level_match = re.search(r'(High|Medium|Low) (Conservative|Liberal)|Neutral - (Balanced|Apolitical)', response)
+        category_level = category_level_match.group(0) if category_level_match else "Unable to determine"
+        
+        # Remove the category and level from the explanation
+        explanation = re.sub(r'^.*?(High|Medium|Low) (Conservative|Liberal)|Neutral - (Balanced|Apolitical)', '', response, 1, re.DOTALL).strip()
+        
+        return category_level, explanation
+    except Exception as e:
+        return f"Error in Anthropic analysis: {str(e)}", ""
+
+# Main process
+def run_analysis(file_name, column_name):
+    df = load_data(file_name, column_name)
+    
+    # Create new columns for category/level and explanation
+    df.insert(df.columns.get_loc(column_name) + 1, 'category_level', '')
+    df.insert(df.columns.get_loc('category_level') + 1, 'explanation', '')
+    
+    for index, row in df.iterrows():
+        article = row[column_name]
+        category_level, explanation = analyze_text_anthropic(article)
+        df.at[index, 'category_level'] = category_level
+        df.at[index, 'explanation'] = explanation
+        
+        # Print progress
+        print(f"Analyzed article {index + 1}/{len(df)}")
+    
+    return df
+
+# Run the analysis
+try:
+    file_name = 'stuff.csv'  # Change this to your actual file name
+    column_name = 'articles'  # Change this to your actual column name
+    result_df = run_analysis(file_name, column_name)
+    
+    # Save the results
+    result_df.to_csv('stuff_with_analysis.csv', index=False)
+    print("Analysis complete. Results saved to 'stuff_with_analysis.csv'")
+except ValueError as e:
+    print(e)
+    column_name = input("Please enter the correct column name: ")
+    result_df = run_analysis(file_name, column_name)
+    result_df.to_csv('stuff_with_analysis.csv', index=False)
+    print("Analysis complete. Results saved to 'stuff_with_analysis.csv'")
+
+# Display the first few rows of the result
+print(result_df.head())
